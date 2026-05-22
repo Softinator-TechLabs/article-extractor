@@ -32,6 +32,15 @@ class URLExtractResult(BaseModel):
     error: Optional[str] = None
 
 
+class SingleURLExtractRequest(BaseModel):
+    article_pdf_link: HttpUrl
+
+
+class SingleURLExtractResult(BaseModel):
+    content: Optional[str] = None
+    error: Optional[str] = None
+
+
 class FileTooLargeError(Exception):
     """Raised when a downloaded file exceeds the size limit."""
     pass
@@ -112,3 +121,22 @@ async def extract_urls(body: URLExtractRequest, request: Request):
 
     results = await asyncio.gather(*tasks)
     return list(results)
+
+
+@router.post("/article-url", response_model=SingleURLExtractResult)
+async def extract_article_url(body: SingleURLExtractRequest, request: Request):
+    """Extract text from a single article PDF link."""
+    client = request.app.state.http_client
+    executor = request.app.state.executor
+    download_semaphore = request.app.state.download_semaphore
+    extraction_semaphore = request.app.state.extraction_semaphore
+
+    result = await _process_url(
+        str(body.article_pdf_link), 
+        client, 
+        executor, 
+        download_semaphore, 
+        extraction_semaphore
+    )
+
+    return SingleURLExtractResult(content=result.content, error=result.error)
