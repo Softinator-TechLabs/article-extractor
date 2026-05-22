@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from app.extractors.pdf import PDFExtractor
 from app.extractors.docx import DocxExtractor
+from app.extractors.doc import DocExtractor
 from app.extractors.tex import TexExtractor
 from app.extractors.rtf import RTFExtractor
 from app.extractors.plaintext import PlainTextExtractor
@@ -26,6 +27,7 @@ class UnsupportedFormatError(Exception):
 _EXTENSION_MAP: dict[str, type] = {
     ".pdf": PDFExtractor,
     ".docx": DocxExtractor,
+    ".doc": DocExtractor,
     ".tex": TexExtractor,
     ".rtf": RTFExtractor,
     ".md": PlainTextExtractor,
@@ -38,6 +40,7 @@ _EXTENSION_MAP: dict[str, type] = {
 _MIME_MAP: dict[str, type] = {
     "application/pdf": PDFExtractor,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": DocxExtractor,
+    "application/msword": DocExtractor,
     "application/rtf": RTFExtractor,
     "text/rtf": RTFExtractor,
     "text/x-tex": TexExtractor,
@@ -76,6 +79,9 @@ def _sniff_magic_bytes(content: bytes, filename: str | None) -> str | None:
             return ".docx"
         # Unknown ZIP archive — don't assume
         return None
+    # Microsoft OLE Compound File (legacy .doc, .xls, .ppt)
+    if content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return ".doc"
     return None
 
 
