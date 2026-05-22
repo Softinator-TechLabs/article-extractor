@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 50
     REQUEST_TIMEOUT_SECONDS: int = 120
     LOG_LEVEL: str = "INFO"
+    
+    API_KEY: str | None = None
+    CACHE_TTL_SECONDS: int = 3600
+    
     model_config = {
         "env_prefix": "",
         "env_file": ".env",

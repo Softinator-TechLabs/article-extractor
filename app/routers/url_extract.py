@@ -7,6 +7,7 @@ from pydantic import BaseModel, HttpUrl, field_validator
 
 from app.config import settings
 from app.utils.format_router import detect_format, get_extractor, UnsupportedFormatError
+from app.utils.cache import url_cache
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ async def _process_url(
     extraction_semaphore: asyncio.Semaphore,
 ) -> URLExtractResult:
     """Download and extract text from a single URL."""
+    # Check cache first
+    cached_result = url_cache.get(url)
+    if cached_result:
+        logger.info("Cache hit for URL %s", url)
+        return cached_result
+
     try:
         async with download_semaphore:
             async with client.stream("GET", url) as response:
@@ -94,7 +101,10 @@ async def _process_url(
         async with extraction_semaphore:
             text = await extractor.extract(content, filename=url)
 
-        return URLExtractResult(url=url, content=text, error=None)
+        result = URLExtractResult(url=url, content=text, error=None)
+        # Store in cache
+        url_cache.set(url, result)
+        return result
 
     except UnsupportedFormatError as exc:
         logger.warning("Unsupported format for URL %s: %s", url, exc)

@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from app.config import settings
 from app.routers import binary_extract, url_extract
 from app.utils.http_client import close_client, create_client
+from app.dependencies import get_api_key
+from fastapi import Depends
 
 # Configure logging
 logging.basicConfig(
@@ -45,8 +47,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(url_extract.router, prefix="/extract", tags=["extract"])
-app.include_router(binary_extract.router, prefix="/extract", tags=["extract"])
+# Set up global dependencies if API key is configured
+router_dependencies = []
+if settings.API_KEY:
+    router_dependencies.append(Depends(get_api_key))
+
+app.include_router(url_extract.router, prefix="/extract", tags=["extract"], dependencies=router_dependencies)
+app.include_router(binary_extract.router, prefix="/extract", tags=["extract"], dependencies=router_dependencies)
 
 
 @app.get("/health")
