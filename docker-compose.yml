@@ -1,0 +1,16 @@
+services:
+  document-extractor:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MAX_WORKERS=8
+      - MAX_CONCURRENT_DOWNLOADS=10
+      - DOWNLOAD_TIMEOUT_SECONDS=30
+      - MAX_FILE_SIZE_MB=50
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
