@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, HttpUrl, field_validator
@@ -123,20 +123,40 @@ async def extract_urls(body: URLExtractRequest, request: Request):
     return list(results)
 
 
-@router.post("/article-url", response_model=SingleURLExtractResult)
-async def extract_article_url(body: SingleURLExtractRequest, request: Request):
-    """Extract text from a single article PDF link."""
+@router.post("/article-url", response_model=Union[SingleURLExtractResult, list[SingleURLExtractResult]])
+async def extract_article_url(
+    body: Union[SingleURLExtractRequest, list[SingleURLExtractRequest]], 
+    request: Request
+):
+    """Extract text from one or multiple article PDF links.
+    
+    Accepts either a single JSON object or an array of JSON objects.
+    Returns a single result object or an array of result objects respectively.
+    """
     client = request.app.state.http_client
     executor = request.app.state.executor
     download_semaphore = request.app.state.download_semaphore
     extraction_semaphore = request.app.state.extraction_semaphore
 
-    result = await _process_url(
-        str(body.article_pdf_link), 
-        client, 
-        executor, 
-        download_semaphore, 
-        extraction_semaphore
-    )
+    is_list = isinstance(body, list)
+    items = body if is_list else [body]
 
-    return SingleURLExtractResult(content=result.content, error=result.error)
+    tasks = [
+        _process_url(
+            str(item.article_pdf_link), 
+            client, 
+            executor, 
+            download_semaphore, 
+            extraction_semaphore
+        )
+        for item in items
+    ]
+
+    results = await asyncio.gather(*tasks)
+    
+    formatted_results = [
+        SingleURLExtractResult(content=r.content, error=r.error)
+        for r in results
+    ]
+
+    return formatted_results if is_list else formatted_results[0]
