@@ -15,7 +15,7 @@ RUN python3 -c "import tomllib,pathlib;d=tomllib.loads(pathlib.Path('pyproject.t
 FROM python:3.11-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends antiword && \
+    apt-get install -y --no-install-recommends antiword libreoffice-nogui && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder

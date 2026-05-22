@@ -14,6 +14,8 @@ from app.extractors.doc import DocExtractor
 from app.extractors.tex import TexExtractor
 from app.extractors.rtf import RTFExtractor
 from app.extractors.plaintext import PlainTextExtractor
+from app.extractors.pptx import PptxExtractor
+from app.extractors.ppt import PptExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,8 @@ _EXTENSION_MAP: dict[str, type] = {
     ".pdf": PDFExtractor,
     ".docx": DocxExtractor,
     ".doc": DocExtractor,
+    ".pptx": PptxExtractor,
+    ".ppt": PptExtractor,
     ".tex": TexExtractor,
     ".rtf": RTFExtractor,
     ".md": PlainTextExtractor,
@@ -41,6 +45,8 @@ _MIME_MAP: dict[str, type] = {
     "application/pdf": PDFExtractor,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": DocxExtractor,
     "application/msword": DocExtractor,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": PptxExtractor,
+    "application/vnd.ms-powerpoint": PptExtractor,
     "application/rtf": RTFExtractor,
     "text/rtf": RTFExtractor,
     "text/x-tex": TexExtractor,
@@ -72,15 +78,24 @@ def _sniff_magic_bytes(content: bytes, filename: str | None) -> str | None:
     # PDF
     if content[:4] == b"%PDF":
         return ".pdf"
-    # ZIP-based (could be .docx)
+    # ZIP-based (could be .docx, .pptx)
     if content[:4] == b"PK\x03\x04":
         ext = _extract_extension(filename)
         if ext == ".docx":
             return ".docx"
+        elif ext == ".pptx":
+            return ".pptx"
         # Unknown ZIP archive — don't assume
         return None
     # Microsoft OLE Compound File (legacy .doc, .xls, .ppt)
     if content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        ext = _extract_extension(filename)
+        if ext == ".ppt":
+            return ".ppt"
+        if ext == ".doc":
+            return ".doc"
+        # Default to .doc if no extension is provided
+        logger.warning("OLE2 magic byte found without extension, defaulting to .doc")
         return ".doc"
     return None
 
