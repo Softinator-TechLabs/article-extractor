@@ -34,11 +34,15 @@ class URLExtractResult(BaseModel):
 
 class SingleURLExtractRequest(BaseModel):
     article_pdf_link: HttpUrl
+    
+    model_config = {"extra": "allow"}
 
 
 class SingleURLExtractResult(BaseModel):
     content: Optional[str] = None
     error: Optional[str] = None
+
+    model_config = {"extra": "allow"}
 
 
 class FileTooLargeError(Exception):
@@ -154,9 +158,11 @@ async def extract_article_url(
 
     results = await asyncio.gather(*tasks)
     
-    formatted_results = [
-        SingleURLExtractResult(content=r.content, error=r.error)
-        for r in results
-    ]
+    formatted_results = []
+    for item, r in zip(items, results):
+        extra = item.model_extra or {}
+        formatted_results.append(
+            SingleURLExtractResult(content=r.content, error=r.error, **extra)
+        )
 
     return formatted_results if is_list else formatted_results[0]
