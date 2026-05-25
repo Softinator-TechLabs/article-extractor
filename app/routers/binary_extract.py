@@ -34,17 +34,16 @@ async def _extract_item(
                 binary_key,
                 index,
             )
-            return {
-                "mdBinaryKey": f"file_{index}",
-                "text": text,
-            }
+            item["text"] = text
+            return item
 
         if not hasattr(upload_file, "read"):
             logger.warning("Item %d field '%s' is not a file.", index, binary_key)
-            return {
-                "mdBinaryKey": f"file_{index}",
-                "text": text,
-            }
+            item["text"] = text
+            return item
+
+        if not file_name and getattr(upload_file, "filename", None):
+            file_name = upload_file.filename
 
         async with extraction_semaphore:
             # Read file content
@@ -72,10 +71,8 @@ async def _extract_item(
             type(exc).__name__,
         )
 
-    return {
-        "mdBinaryKey": f"file_{index}",
-        "text": text,
-    }
+    item["text"] = text
+    return item
 
 
 @router.post("/binary")
@@ -89,8 +86,7 @@ async def extract_binary(
     - ``data``: JSON-encoded array of metadata objects
     - One file field per item, keyed by the item's ``binaryKey`` value
 
-    Returns a clean array with extracted ``text`` and ``mdBinaryKey``
-    for each item.
+    Returns the same metadata array with ``text`` added to each item.
     """
     executor = request.app.state.executor
 
