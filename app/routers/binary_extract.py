@@ -23,6 +23,7 @@ async def _extract_item(
     """Process a single item from the binary extraction request."""
     binary_key = item.get("binaryKey", "")
     file_name = item.get("fileName", "")
+    text = ""
 
     try:
         # Look up the uploaded file by the binary key
@@ -33,16 +34,17 @@ async def _extract_item(
                 binary_key,
                 index,
             )
-            item["text"] = ""
-            item["originalBinaryKey"] = binary_key
-            item["mdBinaryKey"] = f"file_{index}"
-            item["mdFileName"] = "full.md"
-            return item
+            return {
+                "mdBinaryKey": f"file_{index}",
+                "text": text,
+            }
 
         if not hasattr(upload_file, "read"):
             logger.warning("Item %d field '%s' is not a file.", index, binary_key)
-            item["text"] = ""
-            return item
+            return {
+                "mdBinaryKey": f"file_{index}",
+                "text": text,
+            }
 
         async with extraction_semaphore:
             # Read file content
@@ -59,11 +61,8 @@ async def _extract_item(
             extractor = get_extractor(fmt, executor)
             text = await extractor.extract(content, filename=file_name)
 
-        item["text"] = text
-
     except UnsupportedFormatError as exc:
         logger.warning("Unsupported format for item %d (%s): %s", index, file_name, exc)
-        item["text"] = ""
     except Exception as exc:
         logger.warning(
             "Extraction failed for item %d (%s): %s (%s)",
@@ -72,13 +71,11 @@ async def _extract_item(
             exc,
             type(exc).__name__,
         )
-        item["text"] = ""
 
-    # Always add these metadata fields
-    item["originalBinaryKey"] = binary_key
-    item["mdBinaryKey"] = f"file_{index}"
-    item["mdFileName"] = "full.md"
-    return item
+    return {
+        "mdBinaryKey": f"file_{index}",
+        "text": text,
+    }
 
 
 @router.post("/binary")
@@ -92,8 +89,8 @@ async def extract_binary(
     - ``data``: JSON-encoded array of metadata objects
     - One file field per item, keyed by the item's ``binaryKey`` value
 
-    Returns the same metadata array with ``text``, ``originalBinaryKey``,
-    ``mdBinaryKey``, and ``mdFileName`` fields added to each item.
+    Returns a clean array with extracted ``text`` and ``mdBinaryKey``
+    for each item.
     """
     executor = request.app.state.executor
 
