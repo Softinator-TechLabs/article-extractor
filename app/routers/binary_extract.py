@@ -25,6 +25,11 @@ async def _extract_item(
     file_name = item.get("fileName", "")
     text = ""
 
+    if "n8n_meta" in item and isinstance(item["n8n_meta"], dict):
+        return_item = item["n8n_meta"]
+    else:
+        return_item = item
+
     try:
         # Look up the uploaded file by the binary key
         upload_file = form_files.get(binary_key)
@@ -34,13 +39,13 @@ async def _extract_item(
                 binary_key,
                 index,
             )
-            item["text"] = text
-            return item
+            return_item["text"] = text
+            return return_item
 
         if not hasattr(upload_file, "read"):
             logger.warning("Item %d field '%s' is not a file.", index, binary_key)
-            item["text"] = text
-            return item
+            return_item["text"] = text
+            return return_item
 
         if not file_name and getattr(upload_file, "filename", None):
             file_name = upload_file.filename
@@ -71,8 +76,8 @@ async def _extract_item(
             type(exc).__name__,
         )
 
-    item["text"] = text
-    return item
+    return_item["text"] = text
+    return return_item
 
 
 @router.post("/binary")
