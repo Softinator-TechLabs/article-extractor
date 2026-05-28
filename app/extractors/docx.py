@@ -28,7 +28,7 @@ class DocxExtractor(BaseExtractor):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self._executor, self._sync_extract, content, filename)
 
-    def _sync_extract(self, content: bytes, filename: str) -> str:
+    def _sync_extract(self, content: bytes, filename: str = "") -> str:
         try:
             return self._extract_with_python_docx(content)
         except Exception as exc:
