@@ -24,4 +24,6 @@ class PDFExtractor(BaseExtractor):
     def _sync_extract(content: bytes) -> str:
         # Optimization: Parse the PDF entirely in memory instead of using temporary files on disk
         with fitz.open(stream=content, filetype="pdf") as doc:
-            return pymupdf4llm.to_markdown(doc)
+            # We explicitly disable OCR to avoid Tesseract processing embedded images (like profile pictures)
+            # which slows down extraction and spams stderr with "Image too small" warnings.
+            return pymupdf4llm.to_markdown(doc, use_ocr=False)
