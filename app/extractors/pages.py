@@ -44,7 +44,7 @@ class PagesExtractor(BaseExtractor):
                     logger.debug("pages: using QuickLook/Preview.pdf strategy")
                     pdf_bytes = z.read("QuickLook/Preview.pdf")
                     if self._pdf_extractor:
-                        return self._pdf_extractor._sync_extract(pdf_bytes, filename)
+                        return self._pdf_extractor._sync_extract(pdf_bytes)
 
                 # Strategy 2: older XML-based format
                 if "index.xml" in namelist:

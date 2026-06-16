@@ -16,6 +16,7 @@ from app.extractors.ppt import PptExtractor
 from app.extractors.tex import TexExtractor
 from app.extractors.rtf import RTFExtractor
 from app.extractors.plaintext import PlainTextExtractor
+from app.extractors.image import ImageExtractor
 
 from app.extractors.xlsx import XlsxExtractor
 from app.extractors.html import HtmlExtractor
@@ -77,6 +78,13 @@ _EXTENSION_MAP: dict[str, type] = {
 
     # E-book
     ".epub":     EpubExtractor,
+
+    # Images
+    ".png":      ImageExtractor,
+    ".jpg":      ImageExtractor,
+    ".jpeg":     ImageExtractor,
+    ".tiff":     ImageExtractor,
+    ".bmp":      ImageExtractor,
 }
 
 
@@ -84,6 +92,8 @@ _EXTENSION_MAP: dict[str, type] = {
 PDF_MAGIC    = b"%PDF"
 OLE2_MAGIC   = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ZIP_MAGIC    = b"PK\x03\x04"
+PNG_MAGIC    = b"\x89PNG\r\n\x1a\n"
+JPEG_MAGIC   = b"\xff\xd8\xff"
 
 # ZIP-based formats: inspect internal structure to disambiguate
 ZIP_INTERNAL_SIGNATURES = {
@@ -108,6 +118,12 @@ def detect_format_from_bytes(content: bytes, filename: str = "") -> str:
 
     if content[:4] == PDF_MAGIC:
         return ".pdf"
+
+    if header == PNG_MAGIC:
+        return ".png"
+
+    if content[:3] == JPEG_MAGIC:
+        return ".jpeg"
 
     if header == OLE2_MAGIC:
         # OLE2: .doc, .ppt, or .xls — use filename extension to pick

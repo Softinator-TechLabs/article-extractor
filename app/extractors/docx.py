@@ -43,20 +43,21 @@ class DocxExtractor(BaseExtractor):
         doc = docx.Document(io.BytesIO(content))
         parts: list[str] = []
 
+        # Pre-cache paragraph and table mappings to avoid O(N^2) lookup and computed property OOMs
+        para_map = {p._element: p for p in doc.paragraphs}
+        table_map = {t._element: t for t in doc.tables}
+
         for element in doc.element.body:
             tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
 
             if tag == "p":
-                # Find the matching Paragraph object
-                for para in doc.paragraphs:
-                    if para._element is element:
-                        parts.append(self._format_paragraph(para))
-                        break
+                para = para_map.get(element)
+                if para is not None:
+                    parts.append(self._format_paragraph(para))
             elif tag == "tbl":
-                for table in doc.tables:
-                    if table._element is element:
-                        parts.append(self._format_table(table))
-                        break
+                table = table_map.get(element)
+                if table is not None:
+                    parts.append(self._format_table(table))
 
         body_text = "\n\n".join(p for p in parts if p.strip())
 

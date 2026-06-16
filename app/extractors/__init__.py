@@ -7,6 +7,7 @@ from app.extractors.ppt import PptExtractor
 from app.extractors.tex import TexExtractor
 from app.extractors.rtf import RTFExtractor
 from app.extractors.plaintext import PlainTextExtractor
+from app.extractors.image import ImageExtractor
 
 __all__ = [
     "BaseExtractor",
@@ -18,4 +19,5 @@ __all__ = [
     "TexExtractor",
     "RTFExtractor",
     "PlainTextExtractor",
+    "ImageExtractor",
 ]

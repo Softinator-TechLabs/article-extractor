@@ -15,7 +15,7 @@ RUN python3 -c "import tomllib,pathlib;d=tomllib.loads(pathlib.Path('pyproject.t
 FROM python:3.11-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libreoffice-nogui && \
+    apt-get install -y --no-install-recommends libreoffice-nogui tesseract-ocr tesseract-ocr-eng && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
