@@ -13,3 +13,4 @@ dist/
 build/
 .env
 uv.lock
+data/
