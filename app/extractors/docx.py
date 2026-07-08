@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from lxml import etree
 import docx
 import mammoth
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 from app.extractors.base import BaseExtractor
 
@@ -43,21 +45,11 @@ class DocxExtractor(BaseExtractor):
         doc = docx.Document(io.BytesIO(content))
         parts: list[str] = []
 
-        # Pre-cache paragraph and table mappings to avoid O(N^2) lookup and computed property OOMs
-        para_map = {p._element: p for p in doc.paragraphs}
-        table_map = {t._element: t for t in doc.tables}
-
-        for element in doc.element.body:
-            tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
-
-            if tag == "p":
-                para = para_map.get(element)
-                if para is not None:
-                    parts.append(self._format_paragraph(para))
-            elif tag == "tbl":
-                table = table_map.get(element)
-                if table is not None:
-                    parts.append(self._format_table(table))
+        for item in self._iter_block_items(doc.element.body, doc):
+            if isinstance(item, Paragraph):
+                parts.append(self._format_paragraph(item))
+            elif isinstance(item, Table):
+                parts.append(self._format_table(item))
 
         body_text = "\n\n".join(p for p in parts if p.strip())
 
@@ -198,3 +190,16 @@ class DocxExtractor(BaseExtractor):
     def _extract_with_mammoth(content: bytes) -> str:
         result = mammoth.extract_raw_text(io.BytesIO(content))
         return result.value
+
+    @classmethod
+    def _iter_block_items(cls, parent, document):
+        """Yield paragraphs/tables in document order, including content controls."""
+        for element in parent:
+            tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
+
+            if tag == "p":
+                yield Paragraph(element, document)
+            elif tag == "tbl":
+                yield Table(element, document)
+            else:
+                yield from cls._iter_block_items(element, document)

@@ -1,5 +1,6 @@
 import io
 import zipfile
+import xml.etree.ElementTree as ET
 import pytest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -32,6 +33,51 @@ def create_mock_docx() -> bytes:
     return stream.getvalue()
 
 
+def create_docx_with_content_controls() -> bytes:
+    doc = docx.Document()
+    doc.add_paragraph("Title inside content control")
+    doc.add_paragraph("Body outside content control")
+    doc.add_paragraph("Reference inside content control")
+
+    stream = io.BytesIO()
+    doc.save(stream)
+
+    ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    ET.register_namespace("w", ns)
+
+    source = zipfile.ZipFile(io.BytesIO(stream.getvalue()))
+    document_xml = source.read("word/document.xml")
+    root = ET.fromstring(document_xml)
+    body = root.find(f"{{{ns}}}body")
+    assert body is not None
+
+    paragraph_indexes = [
+        i for i, child in enumerate(list(body))
+        if child.tag == f"{{{ns}}}p"
+    ]
+
+    for child_index in (paragraph_indexes[-1], paragraph_indexes[0]):
+        child = list(body)[child_index]
+        sdt = ET.Element(f"{{{ns}}}sdt")
+        sdt_content = ET.SubElement(sdt, f"{{{ns}}}sdtContent")
+        body.remove(child)
+        sdt_content.append(child)
+        body.insert(child_index, sdt)
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as target:
+        for item in source.infolist():
+            data = (
+                ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                if item.filename == "word/document.xml"
+                else source.read(item.filename)
+            )
+            target.writestr(item, data)
+
+    source.close()
+    return output.getvalue()
+
+
 def create_mock_zip(files: dict[str, bytes]) -> bytes:
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as zf:
@@ -53,6 +99,22 @@ async def test_docx_extractor_correctness():
     assert "| Header A | Header B |" in text
     assert "| Cell A1 | Cell B1 |" in text
     assert "Another paragraph after table." in text
+    executor.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_docx_extractor_reads_content_controls():
+    executor = ThreadPoolExecutor(max_workers=1)
+    extractor = DocxExtractor(executor)
+
+    content = create_docx_with_content_controls()
+    text = await extractor.extract(content, filename="content_controls.docx")
+
+    assert "Title inside content control" in text
+    assert "Body outside content control" in text
+    assert "Reference inside content control" in text
+    assert text.index("Title inside content control") < text.index("Body outside content control")
+    assert text.index("Body outside content control") < text.index("Reference inside content control")
     executor.shutdown()
 
 
