@@ -17,6 +17,13 @@ router = APIRouter()
 class URLExtractRequest(BaseModel):
     urls: list[HttpUrl]
 
+    @field_validator("urls", mode="before")
+    @classmethod
+    def coerce_single_url_to_list(cls, v):
+        if isinstance(v, (str, HttpUrl)):
+            return [v]
+        return v
+
     @field_validator("urls")
     @classmethod
     def urls_not_empty(cls, v):
@@ -96,16 +103,39 @@ async def _process_url(
         # Detect format
         fmt = detect_format(content, filename=url, content_type=content_type)
 
-        # Extract text
+        # Extract text with timeout enforcement
         extractor = get_extractor(fmt, executor)
         async with extraction_semaphore:
-            text = await extractor.extract(content, filename=url)
+            text = await asyncio.wait_for(
+                extractor.extract(content, filename=url),
+                timeout=float(settings.REQUEST_TIMEOUT_SECONDS),
+            )
 
-        result = URLExtractResult(url=url, content=text, error=None)
-        # Store in cache
+        # Detect empty extraction
+        if not text.strip():
+            logger.warning(
+                "Extraction yielded no text for URL %s — document may be empty, image-only, or contain unreadable vectorized paths",
+                url,
+            )
+            result = URLExtractResult(
+                url=url,
+                content=text,
+                error="Extraction yielded no text. Document may be empty, image-only, or contain unreadable vectorized paths.",
+            )
+        else:
+            result = URLExtractResult(url=url, content=text, error=None)
+
+        # Store in cache (cache only stores if content is not None and not blank)
         url_cache.set(url, result)
         return result
 
+    except TimeoutError:
+        logger.warning("Extraction timed out after %ds for URL %s", settings.REQUEST_TIMEOUT_SECONDS, url)
+        return URLExtractResult(
+            url=url,
+            content=None,
+            error=f"TimeoutError: Extraction exceeded {settings.REQUEST_TIMEOUT_SECONDS}s limit",
+        )
     except UnsupportedFormatError as exc:
         logger.warning("Unsupported format for URL %s: %s", url, exc)
         return URLExtractResult(url=url, content=None, error=str(exc))

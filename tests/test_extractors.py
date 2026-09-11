@@ -198,3 +198,132 @@ async def test_image_extractor():
         mock_ocr.assert_called_once()
         
     executor.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_plaintext_extractor_instantiation_and_extraction():
+    from app.extractors.plaintext import PlainTextExtractor
+    executor = ThreadPoolExecutor(max_workers=1)
+    extractor = PlainTextExtractor(executor)
+    
+    raw = b"# Sample Heading\nThis is plain text."
+    result = await extractor.extract(raw, filename="test.md")
+    assert "# Sample Heading" in result
+    assert "This is plain text." in result
+    executor.shutdown()
+
+
+def test_cache_rejects_blank_content():
+    from app.utils.cache import URLCache
+    from app.routers.url_extract import URLExtractResult
+    cache = URLCache(ttl_seconds=60)
+    
+    # Empty string should not be cached
+    cache.set("https://example.com/empty", URLExtractResult(url="https://example.com/empty", content=""))
+    assert cache.get("https://example.com/empty") is None
+
+    # Whitespace-only string should not be cached
+    cache.set("https://example.com/ws", URLExtractResult(url="https://example.com/ws", content="\n  \n\t"))
+    assert cache.get("https://example.com/ws") is None
+
+    # Meaningful text should be cached
+    cache.set("https://example.com/valid", URLExtractResult(url="https://example.com/valid", content="Meaningful extracted text"))
+    cached = cache.get("https://example.com/valid")
+    assert cached is not None
+    assert cached.content == "Meaningful extracted text"
+
+
+def test_url_extract_request_coercion():
+    from app.routers.url_extract import URLExtractRequest
+    # Single string URL should be coerced into list
+    req = URLExtractRequest.model_validate({"urls": "https://example.com/document.pdf"})
+    assert isinstance(req.urls, list)
+    assert len(req.urls) == 1
+    assert str(req.urls[0]) == "https://example.com/document.pdf"
+
+    # List of URLs should remain list
+    req2 = URLExtractRequest.model_validate({"urls": ["https://example.com/1.pdf", "https://example.com/2.pdf"]})
+    assert len(req2.urls) == 2
+
+
+def test_cache_endpoints():
+    from app.utils.cache import url_cache
+    with TestClient(app) as client:
+        # Initial stats
+        res = client.get("/cache")
+        assert res.status_code == 200
+        data = res.json()
+        assert "cached_entries" in data
+        assert "ttl_seconds" in data
+
+        # Flush cache
+        del_res = client.delete("/cache")
+        assert del_res.status_code == 200
+        assert "flushed" in del_res.json()
+
+
+@pytest.mark.asyncio
+async def test_pdf_ocr_fallback_triggers_when_empty():
+    from app.extractors.pdf import PDFExtractor
+    executor = ThreadPoolExecutor(max_workers=1)
+    extractor = PDFExtractor(executor)
+
+    call_history = []
+
+    def mock_to_markdown(doc, use_ocr=False, **kwargs):
+        call_history.append({"use_ocr": use_ocr, **kwargs})
+        if not use_ocr:
+            return "\n\n\n"  # Pass 1 returns blank text
+        return "# OCR Extracted Title\nSome OCR content"  # Pass 2 returns OCR content
+
+    with patch("pymupdf4llm.to_markdown", side_effect=mock_to_markdown), \
+         patch("pymupdf.open") as mock_open:
+        mock_doc = MagicMock()
+        mock_doc.is_encrypted = False
+        mock_doc.__len__.return_value = 1
+        mock_doc.__enter__.return_value = mock_doc
+        mock_doc.__exit__.return_value = False
+        mock_open.return_value = mock_doc
+
+        result = await extractor.extract(b"%PDF mock", filename="test.pdf")
+
+    # Assert both passes were called
+    assert len(call_history) == 2
+    assert call_history[0]["use_ocr"] is False
+    assert call_history[1]["use_ocr"] is True
+    assert "OCR Extracted Title" in result
+
+    executor.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_pdf_encrypted_raises_value_error():
+    from app.extractors.pdf import PDFExtractor
+    executor = ThreadPoolExecutor(max_workers=1)
+    extractor = PDFExtractor(executor)
+
+    with patch("pymupdf.open") as mock_open:
+        mock_doc = MagicMock()
+        mock_doc.is_encrypted = True
+        mock_doc.__enter__.return_value = mock_doc
+        mock_doc.__exit__.return_value = False
+        mock_open.return_value = mock_doc
+
+        with pytest.raises(ValueError, match="encrypted"):
+            await extractor.extract(b"%PDF mock", filename="test.pdf")
+
+    executor.shutdown()
+
+
+def test_binary_extraction_endpoint():
+    import json
+    with TestClient(app) as client:
+        metadata = [{"binaryKey": "file1", "fileName": "notes.txt", "docId": 42}]
+        files = {"file1": ("notes.txt", b"Extracted from multipart form upload", "text/plain")}
+        res = client.post("/extract/binary", data={"data": json.dumps(metadata)}, files=files)
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data) == 1
+        assert data[0]["text"] == "Extracted from multipart form upload"
+        assert data[0]["docId"] == 42
+

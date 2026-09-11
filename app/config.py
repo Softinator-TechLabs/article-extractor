@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     
     API_KEY: str | None = None
     CACHE_TTL_SECONDS: int = 3600
+
+    # OCR Fallback Configuration
+    ENABLE_OCR_FALLBACK: bool = True
+    OCR_LANGUAGE: str = "eng"
+    OCR_CHARS_PER_PAGE_THRESHOLD: int = 50
     
     model_config = {
         "env_prefix": "",

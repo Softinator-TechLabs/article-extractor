@@ -1,5 +1,7 @@
 import logging
 
+from typing import Any
+
 from app.extractors.base import BaseExtractor
 
 logger = logging.getLogger(__name__)
@@ -13,6 +15,9 @@ class PlainTextExtractor(BaseExtractor):
     """
 
     _ENCODINGS = ("utf-8", "utf-8-sig", "latin-1", "cp1252")
+
+    def __init__(self, executor: Any = None) -> None:
+        self._executor = executor
 
     async def extract(self, content: bytes, filename: str = "") -> str:
         for encoding in self._ENCODINGS:

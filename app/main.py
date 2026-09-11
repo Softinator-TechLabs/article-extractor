@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.routers import binary_extract, url_extract
+from app.utils.cache import url_cache
 from app.utils.http_client import close_client, create_client
 from app.dependencies import get_api_key
 from fastapi import Depends
@@ -60,3 +61,16 @@ app.include_router(binary_extract.router, prefix="/extract", tags=["extract"], d
 async def health():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/cache", dependencies=router_dependencies)
+async def get_cache_stats():
+    """Return in-memory cache statistics for this worker process."""
+    return url_cache.stats()
+
+
+@app.delete("/cache", dependencies=router_dependencies)
+async def flush_cache():
+    """Flush the in-memory URL extraction cache for this worker process."""
+    count = url_cache.clear()
+    return {"flushed": count, "note": "Cache cleared on active worker"}

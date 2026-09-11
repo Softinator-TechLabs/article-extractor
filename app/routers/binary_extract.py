@@ -6,11 +6,17 @@ from typing import Any
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import JSONResponse
 
+from app.config import settings
 from app.utils.format_router import detect_format, get_extractor, UnsupportedFormatError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class FileTooLargeError(Exception):
+    """Raised when an uploaded file exceeds the size limit."""
+    pass
 
 
 async def _extract_item(
@@ -40,19 +46,27 @@ async def _extract_item(
                 index,
             )
             return_item["text"] = text
+            return_item["error"] = f"No uploaded file found for binaryKey: {binary_key}"
             return return_item
 
         if not hasattr(upload_file, "read"):
             logger.warning("Item %d field '%s' is not a file.", index, binary_key)
             return_item["text"] = text
+            return_item["error"] = f"Field '{binary_key}' is not a file"
             return return_item
 
         if not file_name and getattr(upload_file, "filename", None):
             file_name = upload_file.filename
 
+        max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+
         async with extraction_semaphore:
             # Read file content
             content = await upload_file.read()
+            if len(content) > max_bytes:
+                raise FileTooLargeError(
+                    f"File too large: {len(content)} bytes (limit: {settings.MAX_FILE_SIZE_MB} MB)"
+                )
 
             # Detect format from filename extension and MIME
             fmt = detect_format(
@@ -61,12 +75,25 @@ async def _extract_item(
                 content_type=getattr(upload_file, "content_type", None)
             )
 
-            # Extract
+            # Extract with timeout enforcement
             extractor = get_extractor(fmt, executor)
-            text = await extractor.extract(content, filename=file_name)
+            text = await asyncio.wait_for(
+                extractor.extract(content, filename=file_name),
+                timeout=float(settings.REQUEST_TIMEOUT_SECONDS),
+            )
 
+        if not text.strip():
+            return_item["error"] = "Extraction yielded no text. Document may be empty, image-only, or contain unreadable vectorized paths."
+
+    except TimeoutError:
+        logger.warning("Extraction timed out after %ds for item %d (%s)", settings.REQUEST_TIMEOUT_SECONDS, index, file_name)
+        return_item["error"] = f"TimeoutError: Extraction exceeded {settings.REQUEST_TIMEOUT_SECONDS}s limit"
+    except FileTooLargeError as exc:
+        logger.warning("File too large for item %d (%s): %s", index, file_name, exc)
+        return_item["error"] = str(exc)
     except UnsupportedFormatError as exc:
         logger.warning("Unsupported format for item %d (%s): %s", index, file_name, exc)
+        return_item["error"] = str(exc)
     except Exception as exc:
         logger.warning(
             "Extraction failed for item %d (%s): %s (%s)",
@@ -75,6 +102,7 @@ async def _extract_item(
             exc,
             type(exc).__name__,
         )
+        return_item["error"] = f"{type(exc).__name__}: {exc}"
 
     return_item["text"] = text
     return return_item

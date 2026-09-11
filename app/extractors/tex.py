@@ -30,7 +30,7 @@ class TexExtractor(BaseExtractor):
         self._executor = executor
 
     async def extract(self, content: bytes, filename: str = "") -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self._sync_extract, content, filename)
 
     def _sync_extract(self, content: bytes, filename: str = "") -> str:

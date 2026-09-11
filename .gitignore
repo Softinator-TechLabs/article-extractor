@@ -14,3 +14,4 @@ build/
 .env
 uv.lock
 data/
+.DS_Store

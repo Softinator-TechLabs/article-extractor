@@ -47,7 +47,7 @@ class HtmlExtractor(BaseExtractor):
 
     async def extract(self, content: bytes, filename: str = "") -> str:
         # HTML parsing is fast enough; still run in executor to not block
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self._sync_extract, content)
 
     def _sync_extract(self, content: bytes) -> str:
