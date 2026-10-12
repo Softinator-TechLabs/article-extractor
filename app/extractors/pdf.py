@@ -7,6 +7,7 @@ import pymupdf4llm
 
 from app.config import settings
 from app.extractors.base import BaseExtractor
+from app.utils.sanitizer import sanitize_surrogates
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class PDFExtractor(BaseExtractor):
                 return ""
 
             # Pass 1: Fast native text extraction (no OCR)
-            text = pymupdf4llm.to_markdown(doc, use_ocr=False)
+            text = sanitize_surrogates(pymupdf4llm.to_markdown(doc, use_ocr=False))
 
             if not settings.ENABLE_OCR_FALLBACK:
                 return text
@@ -48,10 +49,12 @@ class PDFExtractor(BaseExtractor):
                     settings.OCR_CHARS_PER_PAGE_THRESHOLD,
                 )
                 try:
-                    ocr_text = pymupdf4llm.to_markdown(
-                        doc,
-                        use_ocr=True,
-                        ocr_language=settings.OCR_LANGUAGE,
+                    ocr_text = sanitize_surrogates(
+                        pymupdf4llm.to_markdown(
+                            doc,
+                            use_ocr=True,
+                            ocr_language=settings.OCR_LANGUAGE,
+                        )
                     )
                     # Use OCR output if it produced more meaningful text
                     if len("".join(ocr_text.split())) > non_ws_chars:

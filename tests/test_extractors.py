@@ -327,3 +327,16 @@ def test_binary_extraction_endpoint():
         assert data[0]["text"] == "Extracted from multipart form upload"
         assert data[0]["docId"] == 42
 
+
+def test_binary_extraction_with_surrogates():
+    import json
+    with TestClient(app) as client:
+        with patch("app.extractors.pdf.PDFExtractor.extract", return_value="Title with surrogate \ud835\ud835 text"):
+            metadata = [{"binaryKey": "file1", "fileName": "31.pdf"}]
+            files = {"file1": ("31.pdf", b"%PDF-mock", "application/pdf")}
+            res = client.post("/extract/binary", data={"data": json.dumps(metadata)}, files=files)
+            assert res.status_code == 200
+            data = res.json()
+            assert data[0]["text"] == "Title with surrogate  text"
+
+

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.utils.format_router import detect_format, get_extractor, UnsupportedFormatError
+from app.utils.sanitizer import sanitize_obj, sanitize_surrogates
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ async def _extract_item(
                 extractor.extract(content, filename=file_name),
                 timeout=float(settings.REQUEST_TIMEOUT_SECONDS),
             )
+            text = sanitize_surrogates(text)
 
         if not text.strip():
             return_item["error"] = "Extraction yielded no text. Document may be empty, image-only, or contain unreadable vectorized paths."
@@ -104,7 +106,7 @@ async def _extract_item(
         )
         return_item["error"] = f"{type(exc).__name__}: {exc}"
 
-    return_item["text"] = text
+    return_item["text"] = sanitize_surrogates(text)
     return return_item
 
 
@@ -147,4 +149,4 @@ async def extract_binary(
     ]
     results = await asyncio.gather(*tasks)
 
-    return JSONResponse(content=list(results))
+    return JSONResponse(content=sanitize_obj(list(results)))

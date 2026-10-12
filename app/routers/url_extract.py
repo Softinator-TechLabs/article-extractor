@@ -8,6 +8,7 @@ from pydantic import BaseModel, HttpUrl, field_validator
 from app.config import settings
 from app.utils.format_router import detect_format, get_extractor, UnsupportedFormatError
 from app.utils.cache import url_cache
+from app.utils.sanitizer import sanitize_surrogates
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ async def _process_url(
                 extractor.extract(content, filename=url),
                 timeout=float(settings.REQUEST_TIMEOUT_SECONDS),
             )
+            text = sanitize_surrogates(text)
 
         # Detect empty extraction
         if not text.strip():
