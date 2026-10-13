@@ -22,8 +22,21 @@ class _TextExtractParser(HTMLParser):
         if tag in SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
         # Add line break after block elements
-        if tag in {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6",
-                   "li", "tr", "br", "section", "article"}:
+        if tag in {
+            "p",
+            "div",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "li",
+            "tr",
+            "br",
+            "section",
+            "article",
+        }:
             self._parts.append("\n")
 
     def handle_data(self, data):
@@ -36,6 +49,7 @@ class _TextExtractParser(HTMLParser):
         raw = "".join(self._parts)
         # Collapse multiple blank lines into one
         import re
+
         return re.sub(r"\n{3,}", "\n\n", raw).strip()
 
 

@@ -4,17 +4,18 @@ import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
-from lxml import etree
 import docx
 import mammoth
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from lxml import etree  # type: ignore[attr-defined]
 
 from app.extractors.base import BaseExtractor
 
 logger = logging.getLogger(__name__)
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
 
 class DocxExtractor(BaseExtractor):
     """Extract text from .docx documents.

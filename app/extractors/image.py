@@ -2,8 +2,9 @@ import asyncio
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from PIL import Image
+
 import pytesseract
+from PIL import Image
 
 from app.config import settings
 from app.extractors.base import BaseExtractor
@@ -21,9 +22,7 @@ class ImageExtractor(BaseExtractor):
 
     async def extract(self, content: bytes, filename: str = "") -> str:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._executor, self._sync_extract, content
-        )
+        return await loop.run_in_executor(self._executor, self._sync_extract, content)
 
     def _sync_extract(self, content: bytes) -> str:
         try:
@@ -41,4 +40,4 @@ class ImageExtractor(BaseExtractor):
                 return text.strip()
         except Exception as e:
             logger.error("Failed to perform OCR: %s", e)
-            raise RuntimeError(f"OCR extraction failed: {e}")
+            raise RuntimeError(f"OCR extraction failed: {e}") from e

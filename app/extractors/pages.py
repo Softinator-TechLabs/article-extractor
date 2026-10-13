@@ -3,6 +3,7 @@ import io
 import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from xml.etree import ElementTree
 
 from app.extractors.base import BaseExtractor
@@ -27,8 +28,8 @@ class PagesExtractor(BaseExtractor):
         self._executor = executor
         # Lazy imports to avoid circular dependency — set by format_router
         # after all extractors are instantiated
-        self._pdf_extractor = None
-        self._doc_extractor = None
+        self._pdf_extractor: Any = None
+        self._doc_extractor: Any = None
 
     async def extract(self, content: bytes, filename: str = "") -> str:
         loop = asyncio.get_running_loop()
@@ -60,17 +61,19 @@ class PagesExtractor(BaseExtractor):
         # Strategy 3: LibreOffice fallback
         logger.debug("pages: falling back to LibreOffice conversion")
         if self._doc_extractor:
-            from app.extractors.libreoffice_base import LibreOfficeBaseExtractor
             from app.extractors.docx import DocxExtractor
+            from app.extractors.libreoffice_base import LibreOfficeBaseExtractor
 
             class _PagesLOExtractor(LibreOfficeBaseExtractor):
                 INPUT_SUFFIX = ".pages"
                 TARGET_FORMAT = "docx"
+                _delegate: Any = None
 
             extractor = _PagesLOExtractor(self._executor)
-            extractor._delegate = DocxExtractor(self._executor)
+            docx_delegate = DocxExtractor(self._executor)
+            extractor._delegate = docx_delegate
             converted = extractor._convert_via_libreoffice(content, ".pages", "docx")
-            return extractor._delegate._sync_extract(converted)
+            return docx_delegate._sync_extract(converted)
 
         raise RuntimeError("PagesExtractor: all strategies failed and no fallback available")
 
@@ -89,4 +92,4 @@ class PagesExtractor(BaseExtractor):
                     texts.append(elem.tail.strip())
             return "\n".join(texts)
         except ElementTree.ParseError as e:
-            raise RuntimeError(f"pages: index.xml parse failed: {e}")
+            raise RuntimeError(f"pages: index.xml parse failed: {e}") from e

@@ -1,5 +1,5 @@
-from app.extractors.libreoffice_base import LibreOfficeBaseExtractor
 from app.extractors.docx import DocxExtractor
+from app.extractors.libreoffice_base import LibreOfficeBaseExtractor
 
 
 class DocExtractor(LibreOfficeBaseExtractor):

@@ -2,9 +2,9 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from typing import Any
 
 from pptx import Presentation
-from pptx.util import Pt
 
 from app.extractors.base import BaseExtractor
 
@@ -24,24 +24,21 @@ class PptxExtractor(BaseExtractor):
 
     async def extract(self, content: bytes, filename: str = "") -> str:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._executor, self._sync_extract, content
-        )
+        return await loop.run_in_executor(self._executor, self._sync_extract, content)
 
     def _sync_extract(self, content: bytes) -> str:
         prs = Presentation(BytesIO(content))
         slides_text = []
 
-        for slide_num, slide in enumerate(prs.slides, start=1):
+        for slide_num, s_slide in enumerate(prs.slides, start=1):
+            slide: Any = s_slide
             parts = [f"## Slide {slide_num}"]
 
             # Extract text from all shapes on the slide
-            for shape in slide.shapes:
+            for s in slide.shapes:
+                shape: Any = s
                 # Skip slide number / date placeholders
-                if (
-                    shape.is_placeholder
-                    and shape.placeholder_format.idx in SKIP_PLACEHOLDER_TYPES
-                ):
+                if shape.is_placeholder and shape.placeholder_format.idx in SKIP_PLACEHOLDER_TYPES:
                     continue
 
                 # Text frame shapes (titles, content boxes, text boxes)
@@ -55,15 +52,13 @@ class PptxExtractor(BaseExtractor):
                 elif shape.has_table:
                     table = shape.table
                     for row in table.rows:
-                        cells = [
-                            cell.text.strip() for cell in row.cells
-                        ]
+                        cells = [cell.text.strip() for cell in row.cells]
                         # Skip rows where all cells are empty
                         if any(cells):
                             parts.append(" | ".join(cells))
 
             # Speaker notes (often contain research context and citations)
-            if slide.has_notes_slide:
+            if slide.has_notes_slide and slide.notes_slide and slide.notes_slide.notes_text_frame:
                 notes_text = slide.notes_slide.notes_text_frame.text.strip()
                 if notes_text:
                     parts.append(f"\n_Notes: {notes_text}_")
