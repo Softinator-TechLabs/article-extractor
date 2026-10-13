@@ -1,14 +1,14 @@
 import asyncio
 import logging
-from typing import Optional, Union
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, HttpUrl, field_validator
 
 from app.config import settings
-from app.utils.format_router import detect_format, get_extractor, UnsupportedFormatError
 from app.utils.cache import url_cache
+from app.utils.format_router import UnsupportedFormatError, detect_format, get_extractor
 from app.utils.sanitizer import sanitize_surrogates
+from app.utils.ssrf import SSRFBlockedError, validate_safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -37,25 +37,26 @@ class URLExtractRequest(BaseModel):
 
 class URLExtractResult(BaseModel):
     url: str
-    content: Optional[str] = None
-    error: Optional[str] = None
+    content: str | None = None
+    error: str | None = None
 
 
 class SingleURLExtractRequest(BaseModel):
     article_pdf_link: HttpUrl
-    
+
     model_config = {"extra": "allow"}
 
 
 class SingleURLExtractResult(BaseModel):
-    content: Optional[str] = None
-    error: Optional[str] = None
+    content: str | None = None
+    error: str | None = None
 
     model_config = {"extra": "allow"}
 
 
 class FileTooLargeError(Exception):
     """Raised when a downloaded file exceeds the size limit."""
+
     pass
 
 
@@ -67,6 +68,12 @@ async def _process_url(
     extraction_semaphore: asyncio.Semaphore,
 ) -> URLExtractResult:
     """Download and extract text from a single URL."""
+    try:
+        validate_safe_url(url)
+    except SSRFBlockedError as exc:
+        logger.warning("SSRF blocked URL %s: %s", url, exc)
+        return URLExtractResult(url=url, content=None, error=f"SecurityError: {exc}")
+
     # Check cache first
     cached_result = url_cache.get(url)
     if cached_result:
@@ -131,8 +138,13 @@ async def _process_url(
         url_cache.set(url, result)
         return result
 
+    except SSRFBlockedError as exc:
+        logger.warning("SSRF blocked URL %s during request: %s", url, exc)
+        return URLExtractResult(url=url, content=None, error=f"SecurityError: {exc}")
     except TimeoutError:
-        logger.warning("Extraction timed out after %ds for URL %s", settings.REQUEST_TIMEOUT_SECONDS, url)
+        logger.warning(
+            "Extraction timed out after %ds for URL %s", settings.REQUEST_TIMEOUT_SECONDS, url
+        )
         return URLExtractResult(
             url=url,
             content=None,
@@ -169,13 +181,16 @@ async def extract_urls(body: URLExtractRequest, request: Request):
     return list(results)
 
 
-@router.post("/article-url", response_model=Union[SingleURLExtractResult, list[SingleURLExtractResult]])
+@router.post(
+    "/article-url",
+    response_model=SingleURLExtractResult | list[SingleURLExtractResult],
+)
 async def extract_article_url(
-    body: Union[SingleURLExtractRequest, list[SingleURLExtractRequest]], 
-    request: Request
+    body: SingleURLExtractRequest | list[SingleURLExtractRequest],
+    request: Request,
 ):
     """Extract text from one or multiple article PDF links.
-    
+
     Accepts either a single JSON object or an array of JSON objects.
     Returns a single result object or an array of result objects respectively.
     """
@@ -189,22 +204,20 @@ async def extract_article_url(
 
     tasks = [
         _process_url(
-            str(item.article_pdf_link), 
-            client, 
-            executor, 
-            download_semaphore, 
-            extraction_semaphore
+            str(item.article_pdf_link),
+            client,
+            executor,
+            download_semaphore,
+            extraction_semaphore,
         )
         for item in items
     ]
 
     results = await asyncio.gather(*tasks)
-    
+
     formatted_results = []
-    for item, r in zip(items, results):
+    for item, r in zip(items, results, strict=False):
         extra = item.model_extra or {}
-        formatted_results.append(
-            SingleURLExtractResult(content=r.content, error=r.error, **extra)
-        )
+        formatted_results.append(SingleURLExtractResult(content=r.content, error=r.error, **extra))
 
     return formatted_results if is_list else formatted_results[0]

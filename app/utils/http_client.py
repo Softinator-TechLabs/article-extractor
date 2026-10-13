@@ -1,5 +1,16 @@
 import httpx
+
 from app.config import settings
+from app.utils.ssrf import validate_safe_url
+
+
+async def check_redirect_ssrf(response: httpx.Response) -> None:
+    """Validate that redirect target URLs do not point to restricted IP addresses."""
+    if response.is_redirect:
+        location = response.headers.get("location")
+        if location:
+            target_url = str(response.url.join(location))
+            validate_safe_url(target_url)
 
 
 async def create_client() -> httpx.AsyncClient:
@@ -18,6 +29,7 @@ async def create_client() -> httpx.AsyncClient:
         ),
         follow_redirects=True,
         headers={"User-Agent": "DocumentExtractor/1.0"},
+        event_hooks={"response": [check_redirect_ssrf]},
     )
 
 
