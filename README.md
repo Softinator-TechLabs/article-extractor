@@ -77,15 +77,23 @@ curl -X POST http://localhost:8000/extract/binary \
 
 ## Configuration
 
-All settings are configurable via environment variables:
+All settings are configurable via environment variables (see `.env.example`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAX_WORKERS` | `cpu_count * 2` | ThreadPoolExecutor size |
+| `ENVIRONMENT` | `development` | Environment mode (`production`, `staging`, `development`) |
+| `ENABLE_DOCS` | `false` (in prod) | Enable/disable `/docs`, `/redoc`, and `/openapi.json` |
+| `API_KEY` | `None` | Shared secret key required in `X-API-Key` header |
+| `REQUIRE_API_KEY` | `true` | Fail-fast on startup if in production without API_KEY |
+| `ENABLE_SSRF_PROTECTION` | `true` | Restrict target URLs to public IPs & safe HTTP ports |
+| `MAX_WORKERS` | `4` | ThreadPoolExecutor size per worker process |
 | `MAX_CONCURRENT_DOWNLOADS` | `10` | Max concurrent URL downloads |
 | `DOWNLOAD_TIMEOUT_SECONDS` | `30` | HTTP download timeout |
 | `MAX_FILE_SIZE_MB` | `50` | Maximum file size allowed |
-| `REQUEST_TIMEOUT_SECONDS` | `120` | Overall request timeout |
+| `REQUEST_TIMEOUT_SECONDS` | `120` | Overall extraction request timeout |
+| `CACHE_TTL_SECONDS` | `3600` | In-memory extraction cache TTL |
+| `ENABLE_OCR_FALLBACK` | `true` | Tesseract OCR fallback on low character density |
+| `OCR_LANGUAGE` | `eng` | Tesseract OCR language |
 | `LOG_LEVEL` | `INFO` | Logging level |
 
 ## Deployment on Dokploy
