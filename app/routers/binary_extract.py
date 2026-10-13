@@ -7,7 +7,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.utils.format_router import detect_format, get_extractor, UnsupportedFormatError
+from app.utils.format_router import UnsupportedFormatError, detect_format, get_extractor
 from app.utils.sanitizer import sanitize_obj, sanitize_surrogates
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ router = APIRouter()
 
 class FileTooLargeError(Exception):
     """Raised when an uploaded file exceeds the size limit."""
+
     pass
 
 
@@ -62,7 +63,9 @@ async def _extract_item(
         max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
 
         async with extraction_semaphore:
-            # Read file content
+            # Read file content (rewind pointer first if previously read)
+            if hasattr(upload_file, "seek"):
+                await upload_file.seek(0)
             content = await upload_file.read()
             if len(content) > max_bytes:
                 raise FileTooLargeError(
@@ -71,9 +74,7 @@ async def _extract_item(
 
             # Detect format from filename extension and MIME
             fmt = detect_format(
-                content, 
-                filename=file_name, 
-                content_type=getattr(upload_file, "content_type", None)
+                content, filename=file_name, content_type=getattr(upload_file, "content_type", None)
             )
 
             # Extract with timeout enforcement
@@ -85,11 +86,20 @@ async def _extract_item(
             text = sanitize_surrogates(text)
 
         if not text.strip():
-            return_item["error"] = "Extraction yielded no text. Document may be empty, image-only, or contain unreadable vectorized paths."
+            return_item["error"] = (
+                "Extraction yielded no text. Document may be empty, image-only, or contain unreadable vectorized paths."
+            )
 
     except TimeoutError:
-        logger.warning("Extraction timed out after %ds for item %d (%s)", settings.REQUEST_TIMEOUT_SECONDS, index, file_name)
-        return_item["error"] = f"TimeoutError: Extraction exceeded {settings.REQUEST_TIMEOUT_SECONDS}s limit"
+        logger.warning(
+            "Extraction timed out after %ds for item %d (%s)",
+            settings.REQUEST_TIMEOUT_SECONDS,
+            index,
+            file_name,
+        )
+        return_item["error"] = (
+            f"TimeoutError: Extraction exceeded {settings.REQUEST_TIMEOUT_SECONDS}s limit"
+        )
     except FileTooLargeError as exc:
         logger.warning("File too large for item %d (%s): %s", index, file_name, exc)
         return_item["error"] = str(exc)
@@ -112,8 +122,8 @@ async def _extract_item(
 
 @router.post("/binary")
 async def extract_binary(
+    request: Request,
     data: str = Form(...),
-    request: Request = None,
 ):
     """Extract text from binary file uploads sent by n8n.
 
