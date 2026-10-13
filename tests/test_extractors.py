@@ -1,17 +1,17 @@
 import io
-import zipfile
 import xml.etree.ElementTree as ET
-import pytest
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import docx
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.config import settings
 from app.extractors.docx import DocxExtractor
 from app.extractors.pages import PagesExtractor
+from app.main import app
 
 
 def create_mock_docx() -> bytes:
@@ -51,10 +51,7 @@ def create_docx_with_content_controls() -> bytes:
     body = root.find(f"{{{ns}}}body")
     assert body is not None
 
-    paragraph_indexes = [
-        i for i, child in enumerate(list(body))
-        if child.tag == f"{{{ns}}}p"
-    ]
+    paragraph_indexes = [i for i, child in enumerate(list(body)) if child.tag == f"{{{ns}}}p"]
 
     for child_index in (paragraph_indexes[-1], paragraph_indexes[0]):
         child = list(body)[child_index]
@@ -90,10 +87,10 @@ def create_mock_zip(files: dict[str, bytes]) -> bytes:
 async def test_docx_extractor_correctness():
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = DocxExtractor(executor)
-    
+
     content = create_mock_docx()
     text = await extractor.extract(content, filename="test.docx")
-    
+
     assert "# Test Heading 1" in text
     assert "This is paragraph 1 inside the document." in text
     assert "| Header A | Header B |" in text
@@ -114,7 +111,9 @@ async def test_docx_extractor_reads_content_controls():
     assert "Body outside content control" in text
     assert "Reference inside content control" in text
     assert text.index("Title inside content control") < text.index("Body outside content control")
-    assert text.index("Body outside content control") < text.index("Reference inside content control")
+    assert text.index("Body outside content control") < text.index(
+        "Reference inside content control"
+    )
     executor.shutdown()
 
 
@@ -123,18 +122,18 @@ async def test_pages_extractor_strategy_1_pdf():
     # Test Strategy 1 (post-2013 Pages) - PDF preview inside zip
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = PagesExtractor(executor)
-    
+
     # Mock PDF extractor and its _sync_extract method
     mock_pdf_extractor = MagicMock()
     mock_pdf_extractor._sync_extract.return_value = "Extracted PDF Text from Pages"
     extractor._pdf_extractor = mock_pdf_extractor
-    
+
     # Create pages mock content which is zip containing QuickLook/Preview.pdf
     mock_pdf_bytes = b"%PDF-1.4 mock content"
     content = create_mock_zip({"QuickLook/Preview.pdf": mock_pdf_bytes})
-    
+
     text = await extractor.extract(content, filename="test.pages")
-    
+
     # Assert that signature mismatch does not occur and correct return is got
     assert text == "Extracted PDF Text from Pages"
     mock_pdf_extractor._sync_extract.assert_called_once_with(mock_pdf_bytes)
@@ -146,7 +145,7 @@ async def test_pages_extractor_strategy_2_xml():
     # Test Strategy 2 (pre-2013 Pages) - index.xml
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = PagesExtractor(executor)
-    
+
     xml_content = b"""<?xml version="1.0" encoding="utf-8"?>
     <index>
       <text>Some text in index.xml</text>
@@ -154,9 +153,9 @@ async def test_pages_extractor_strategy_2_xml():
     </index>
     """
     content = create_mock_zip({"index.xml": xml_content})
-    
+
     text = await extractor.extract(content, filename="test_old.pages")
-    
+
     # Assert that text was successfully parsed out of XML
     assert "Some text in index.xml" in text
     assert "Tail text" in text
@@ -174,7 +173,7 @@ def test_api_unauthorized_extract():
     # If API_KEY is set, make sure request without header is unauthorized
     if not settings.API_KEY:
         return
-        
+
     with TestClient(app) as client:
         response = client.post("/extract/urls", json={"urls": []})
         assert response.status_code == 401
@@ -183,29 +182,29 @@ def test_api_unauthorized_extract():
 @pytest.mark.asyncio
 async def test_image_extractor():
     from app.extractors.image import ImageExtractor
+
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = ImageExtractor(executor)
-    
-    with patch("PIL.Image.open") as mock_open, \
-         patch("pytesseract.image_to_string") as mock_ocr:
-        
+
+    with patch("PIL.Image.open") as mock_open, patch("pytesseract.image_to_string") as mock_ocr:
         mock_ocr.return_value = "Mocked OCR Text Results"
-        
+
         text = await extractor.extract(b"mock image bytes", filename="test.png")
-        
+
         assert text == "Mocked OCR Text Results"
         mock_open.assert_called_once()
         mock_ocr.assert_called_once()
-        
+
     executor.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_plaintext_extractor_instantiation_and_extraction():
     from app.extractors.plaintext import PlainTextExtractor
+
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = PlainTextExtractor(executor)
-    
+
     raw = b"# Sample Heading\nThis is plain text."
     result = await extractor.extract(raw, filename="test.md")
     assert "# Sample Heading" in result
@@ -214,20 +213,28 @@ async def test_plaintext_extractor_instantiation_and_extraction():
 
 
 def test_cache_rejects_blank_content():
-    from app.utils.cache import URLCache
     from app.routers.url_extract import URLExtractResult
+    from app.utils.cache import URLCache
+
     cache = URLCache(ttl_seconds=60)
-    
+
     # Empty string should not be cached
-    cache.set("https://example.com/empty", URLExtractResult(url="https://example.com/empty", content=""))
+    cache.set(
+        "https://example.com/empty", URLExtractResult(url="https://example.com/empty", content="")
+    )
     assert cache.get("https://example.com/empty") is None
 
     # Whitespace-only string should not be cached
-    cache.set("https://example.com/ws", URLExtractResult(url="https://example.com/ws", content="\n  \n\t"))
+    cache.set(
+        "https://example.com/ws", URLExtractResult(url="https://example.com/ws", content="\n  \n\t")
+    )
     assert cache.get("https://example.com/ws") is None
 
     # Meaningful text should be cached
-    cache.set("https://example.com/valid", URLExtractResult(url="https://example.com/valid", content="Meaningful extracted text"))
+    cache.set(
+        "https://example.com/valid",
+        URLExtractResult(url="https://example.com/valid", content="Meaningful extracted text"),
+    )
     cached = cache.get("https://example.com/valid")
     assert cached is not None
     assert cached.content == "Meaningful extracted text"
@@ -235,6 +242,7 @@ def test_cache_rejects_blank_content():
 
 def test_url_extract_request_coercion():
     from app.routers.url_extract import URLExtractRequest
+
     # Single string URL should be coerced into list
     req = URLExtractRequest.model_validate({"urls": "https://example.com/document.pdf"})
     assert isinstance(req.urls, list)
@@ -242,12 +250,13 @@ def test_url_extract_request_coercion():
     assert str(req.urls[0]) == "https://example.com/document.pdf"
 
     # List of URLs should remain list
-    req2 = URLExtractRequest.model_validate({"urls": ["https://example.com/1.pdf", "https://example.com/2.pdf"]})
+    req2 = URLExtractRequest.model_validate(
+        {"urls": ["https://example.com/1.pdf", "https://example.com/2.pdf"]}
+    )
     assert len(req2.urls) == 2
 
 
 def test_cache_endpoints():
-    from app.utils.cache import url_cache
     with TestClient(app) as client:
         # Initial stats
         res = client.get("/cache")
@@ -265,6 +274,7 @@ def test_cache_endpoints():
 @pytest.mark.asyncio
 async def test_pdf_ocr_fallback_triggers_when_empty():
     from app.extractors.pdf import PDFExtractor
+
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = PDFExtractor(executor)
 
@@ -276,8 +286,10 @@ async def test_pdf_ocr_fallback_triggers_when_empty():
             return "\n\n\n"  # Pass 1 returns blank text
         return "# OCR Extracted Title\nSome OCR content"  # Pass 2 returns OCR content
 
-    with patch("pymupdf4llm.to_markdown", side_effect=mock_to_markdown), \
-         patch("pymupdf.open") as mock_open:
+    with (
+        patch("pymupdf4llm.to_markdown", side_effect=mock_to_markdown),
+        patch("pymupdf.open") as mock_open,
+    ):
         mock_doc = MagicMock()
         mock_doc.is_encrypted = False
         mock_doc.__len__.return_value = 1
@@ -299,6 +311,7 @@ async def test_pdf_ocr_fallback_triggers_when_empty():
 @pytest.mark.asyncio
 async def test_pdf_encrypted_raises_value_error():
     from app.extractors.pdf import PDFExtractor
+
     executor = ThreadPoolExecutor(max_workers=1)
     extractor = PDFExtractor(executor)
 
@@ -317,6 +330,7 @@ async def test_pdf_encrypted_raises_value_error():
 
 def test_binary_extraction_endpoint():
     import json
+
     with TestClient(app) as client:
         metadata = [{"binaryKey": "file1", "fileName": "notes.txt", "docId": 42}]
         files = {"file1": ("notes.txt", b"Extracted from multipart form upload", "text/plain")}
@@ -330,13 +344,15 @@ def test_binary_extraction_endpoint():
 
 def test_binary_extraction_with_surrogates():
     import json
+
     with TestClient(app) as client:
-        with patch("app.extractors.pdf.PDFExtractor.extract", return_value="Title with surrogate \ud835\ud835 text"):
+        with patch(
+            "app.extractors.pdf.PDFExtractor.extract",
+            return_value="Title with surrogate \ud835\ud835 text",
+        ):
             metadata = [{"binaryKey": "file1", "fileName": "31.pdf"}]
             files = {"file1": ("31.pdf", b"%PDF-mock", "application/pdf")}
             res = client.post("/extract/binary", data={"data": json.dumps(metadata)}, files=files)
             assert res.status_code == 200
             data = res.json()
             assert data[0]["text"] == "Title with surrogate  text"
-
-
