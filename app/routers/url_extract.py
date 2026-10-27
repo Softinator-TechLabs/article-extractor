@@ -60,26 +60,18 @@ class FileTooLargeError(Exception):
     pass
 
 
-async def _process_url(
+_inflight_tasks: dict[str, asyncio.Future[URLExtractResult]] = {}
+_inflight_lock = asyncio.Lock()
+
+
+async def _execute_url_extraction(
     url: str,
     client,
     executor,
     download_semaphore: asyncio.Semaphore,
     extraction_semaphore: asyncio.Semaphore,
 ) -> URLExtractResult:
-    """Download and extract text from a single URL."""
-    try:
-        validate_safe_url(url)
-    except SSRFBlockedError as exc:
-        logger.warning("SSRF blocked URL %s: %s", url, exc)
-        return URLExtractResult(url=url, content=None, error=f"SecurityError: {exc}")
-
-    # Check cache first
-    cached_result = url_cache.get(url)
-    if cached_result:
-        logger.info("Cache hit for URL %s", url)
-        return cached_result
-
+    """Internal runner to download, detect format, and extract text from a single URL."""
     try:
         async with download_semaphore:
             async with client.stream("GET", url) as response:
@@ -107,9 +99,23 @@ async def _process_url(
 
                 content = b"".join(chunks)
                 content_type = response.headers.get("content-type")
+                content_disposition = response.headers.get("content-disposition", "")
+
+        # Detect format, prioritizing Content-Disposition filename if present
+        effective_filename = url
+        if "filename=" in content_disposition.lower():
+            import re
+
+            match = re.search(
+                r'filename\*?=(?:UTF-8\'\')?["\']?([^";\r\n]+)',
+                content_disposition,
+                re.IGNORECASE,
+            )
+            if match:
+                effective_filename = match.group(1).strip()
 
         # Detect format
-        fmt = detect_format(content, filename=url, content_type=content_type)
+        fmt = detect_format(content, filename=effective_filename, content_type=content_type)
 
         # Extract text with timeout enforcement
         extractor = get_extractor(fmt, executor)
@@ -159,6 +165,59 @@ async def _process_url(
     except Exception as exc:
         logger.warning("Failed to process URL %s: %s (%s)", url, exc, type(exc).__name__)
         return URLExtractResult(url=url, content=None, error=f"{type(exc).__name__}: {exc}")
+
+
+async def _process_url(
+    url: str,
+    client,
+    executor,
+    download_semaphore: asyncio.Semaphore,
+    extraction_semaphore: asyncio.Semaphore,
+) -> URLExtractResult:
+    """Download and extract text from a single URL with caching and in-flight coalescing."""
+    try:
+        validate_safe_url(url)
+    except SSRFBlockedError as exc:
+        logger.warning("SSRF blocked URL %s: %s", url, exc)
+        return URLExtractResult(url=url, content=None, error=f"SecurityError: {exc}")
+
+    # Check cache first
+    cached_result = url_cache.get(url)
+    if cached_result:
+        logger.info("Cache hit for URL %s", url)
+        return cached_result
+
+    # Coalesce simultaneous in-flight requests for the identical URL
+    future: asyncio.Future[URLExtractResult] | None = None
+    existing_task: asyncio.Future[URLExtractResult] | None = None
+    async with _inflight_lock:
+        if url in _inflight_tasks:
+            logger.info("Coalescing with active in-flight request for URL %s", url)
+            existing_task = _inflight_tasks[url]
+        else:
+            future = asyncio.get_running_loop().create_future()
+            _inflight_tasks[url] = future
+
+    if existing_task is not None:
+        return await existing_task
+
+    assert future is not None
+
+    try:
+        result = await _execute_url_extraction(
+            url, client, executor, download_semaphore, extraction_semaphore
+        )
+        if not future.done():
+            future.set_result(result)
+        return result
+    except Exception as exc:
+        err_res = URLExtractResult(url=url, content=None, error=f"{type(exc).__name__}: {exc}")
+        if not future.done():
+            future.set_result(err_res)
+        return err_res
+    finally:
+        async with _inflight_lock:
+            _inflight_tasks.pop(url, None)
 
 
 @router.post("/urls", response_model=list[URLExtractResult])

@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     )
     yield
     # ── Shutdown ──
-    app.state.executor.shutdown(wait=True)
+    app.state.executor.shutdown(wait=True, cancel_futures=True)
     await close_client(app.state.http_client)
     logger.info("Document Extractor shut down.")
 

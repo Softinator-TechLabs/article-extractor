@@ -356,3 +356,75 @@ def test_binary_extraction_with_surrogates():
             assert res.status_code == 200
             data = res.json()
             assert data[0]["text"] == "Title with surrogate  text"
+
+
+def test_mime_type_detection_without_extension():
+    from app.utils.format_router import detect_format
+
+    # No extension in URL, but MIME type is provided
+    assert detect_format(b"hello world", filename="https://example.com/item/123", content_type="text/html") == ".html"
+    assert detect_format(b"col1,col2\n1,2", filename="https://example.com/export?id=99", content_type="text/csv") == ".csv"
+    assert detect_format(b"%PDF-1.4", filename="https://example.com/api/get", content_type="application/pdf") == ".pdf"
+
+
+def test_sanitize_surrogates_and_nul_bytes():
+    from app.utils.sanitizer import sanitize_surrogates
+
+    assert sanitize_surrogates("valid text\x00with nul") == "valid textwith nul"
+    assert sanitize_surrogates("surrogate \ud835\ud835 test") == "surrogate  test"
+
+
+@pytest.mark.asyncio
+async def test_pdf_fallback_to_raw_text_on_layout_error():
+    from app.extractors.pdf import PDFExtractor
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    extractor = PDFExtractor(executor)
+
+    with patch("pymupdf.open") as mock_open:
+        mock_page = MagicMock()
+        mock_page.get_text.return_value = "Fallback raw text from PyMuPDF"
+
+        mock_doc = MagicMock()
+        mock_doc.is_encrypted = False
+        mock_doc.__len__.return_value = 1
+        mock_doc.__iter__.return_value = [mock_page]
+        mock_doc.__enter__.return_value = mock_doc
+        mock_doc.__exit__.return_value = False
+        mock_open.return_value = mock_doc
+
+        with patch("pymupdf4llm.to_markdown", side_effect=RuntimeError("Layout parsing model crashed")):
+            text = await extractor.extract(b"%PDF mock", filename="test.pdf")
+            assert "Fallback raw text from PyMuPDF" in text
+
+    executor.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_url_extraction_inflight_coalescing():
+    import asyncio
+
+    from app.routers.url_extract import URLExtractResult, _inflight_tasks, _process_url
+
+    call_count = 0
+
+    async def mock_execute(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return URLExtractResult(url="https://example.com/shared.pdf", content="Extracted once", error=None)
+
+    with patch("app.routers.url_extract.validate_safe_url"):
+        with patch("app.routers.url_extract.url_cache.get", return_value=None):
+            with patch("app.routers.url_extract._execute_url_extraction", side_effect=mock_execute):
+                sem = asyncio.Semaphore(5)
+                r1, r2 = await asyncio.gather(
+                    _process_url("https://example.com/shared.pdf", None, None, sem, sem),
+                    _process_url("https://example.com/shared.pdf", None, None, sem, sem),
+                )
+                assert r1.content == "Extracted once"
+                assert r2.content == "Extracted once"
+                assert call_count == 1
+                assert len(_inflight_tasks) == 0
+
+

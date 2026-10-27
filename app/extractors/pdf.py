@@ -33,8 +33,17 @@ class PDFExtractor(BaseExtractor):
                 return ""
 
             # Pass 1: Fast native text extraction (no OCR)
-            raw_text = pymupdf4llm.to_markdown(doc, use_ocr=False)
-            text = sanitize_surrogates(raw_text if isinstance(raw_text, str) else str(raw_text))
+            try:
+                raw_text = pymupdf4llm.to_markdown(doc, use_ocr=False)
+                text = sanitize_surrogates(raw_text if isinstance(raw_text, str) else str(raw_text))
+            except Exception as layout_err:
+                logger.warning(
+                    "pymupdf4llm layout extraction failed (%s: %s); falling back to direct PyMuPDF text extraction",
+                    type(layout_err).__name__,
+                    layout_err,
+                )
+                raw_text = "\n\n".join(str(page.get_text("text", sort=True)) for page in doc)
+                text = sanitize_surrogates(raw_text)
 
             if not settings.ENABLE_OCR_FALLBACK:
                 return text
@@ -45,9 +54,10 @@ class PDFExtractor(BaseExtractor):
 
             if avg_chars < settings.OCR_CHARS_PER_PAGE_THRESHOLD:
                 logger.info(
-                    "PDF native extraction: %.1f non-whitespace chars/page (threshold %d) — triggering OCR fallback",
+                    "PDF native extraction: %.1f non-whitespace chars/page (threshold %d, %d pages) — triggering OCR fallback",
                     avg_chars,
                     settings.OCR_CHARS_PER_PAGE_THRESHOLD,
+                    page_count,
                 )
                 try:
                     raw_ocr = pymupdf4llm.to_markdown(

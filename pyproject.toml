@@ -50,4 +50,6 @@ include = ["app"]
 pythonVersion = "3.11"
 reportMissingImports = true
 reportMissingTypeStubs = false
+venvPath = "."
+venv = ".venv"
 

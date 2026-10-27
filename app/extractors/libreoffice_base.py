@@ -42,12 +42,18 @@ class LibreOfficeBaseExtractor(BaseExtractor):
             with open(input_path, "wb") as f:
                 f.write(content)
 
+            from pathlib import Path
+            user_dir = os.path.join(tmp_dir, "lo_profile")
+            user_uri = Path(user_dir).as_uri()
             result = subprocess.run(
                 [
                     "libreoffice",
                     "--headless",
                     "--norestore",
+                    "--invisible",
+                    "--nodefault",
                     "--nofirststartwizard",
+                    f"-env:UserInstallation={user_uri}",
                     "--convert-to",
                     target_format,
                     "--outdir",

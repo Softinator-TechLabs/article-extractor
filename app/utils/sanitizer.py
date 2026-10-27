@@ -2,10 +2,11 @@ from typing import Any
 
 
 def sanitize_surrogates(text: str) -> str:
-    """Strip lone/unpaired Unicode surrogate code points that cannot be encoded in UTF-8."""
+    """Strip lone/unpaired Unicode surrogate code points and NUL bytes that corrupt databases."""
     if not text:
         return text
-    return text.encode("utf-8", "ignore").decode("utf-8")
+    cleaned = text.replace("\x00", "")
+    return cleaned.encode("utf-8", "ignore").decode("utf-8")
 
 
 def sanitize_obj(obj: Any) -> Any:

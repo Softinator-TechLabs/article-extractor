@@ -104,10 +104,40 @@ ZIP_INTERNAL_SIGNATURES = {
 }
 
 
-def detect_format_from_bytes(content: bytes, filename: str = "") -> str:
+_MIME_MAP: dict[str, str] = {
+    "application/pdf": ".pdf",
+    "text/html": ".html",
+    "application/xhtml+xml": ".html",
+    "text/csv": ".csv",
+    "text/tab-separated-values": ".tsv",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
+    "application/epub+zip": ".epub",
+    "text/rtf": ".rtf",
+    "application/rtf": ".rtf",
+    "application/x-latex": ".tex",
+    "text/x-tex": ".tex",
+    "text/markdown": ".md",
+    "text/plain": ".txt",
+    "image/png": ".png",
+    "image/jpeg": ".jpeg",
+    "image/tiff": ".tiff",
+    "image/bmp": ".bmp",
+}
+
+
+def detect_format_from_bytes(
+    content: bytes,
+    filename: str = "",
+    content_type: str | None = None,
+) -> str:
     """
     Returns the canonical extension (e.g. ".pdf") for the content.
-    Priority: magic bytes > filename extension.
+    Priority: magic bytes > filename extension > MIME type.
     """
     header = content[:8]
 
@@ -160,10 +190,16 @@ def detect_format_from_bytes(content: bytes, filename: str = "") -> str:
         # ZIP but unrecognised internals: fall back to filename extension
         return _ext(filename) or ".docx"
 
-    # No magic match: use filename extension
+    # Check filename extension
     ext = _ext(filename)
     if ext:
         return ext
+
+    # Check Content-Type MIME header
+    if content_type:
+        mime = content_type.split(";")[0].strip().lower()
+        if mime in _MIME_MAP:
+            return _MIME_MAP[mime]
 
     # Last resort: try to decode as plain text
     try:
@@ -196,7 +232,7 @@ def detect_format(
     """Detect the document format and return the normalised extension string.
     Adapter for the new robust detect_format_from_bytes.
     """
-    return detect_format_from_bytes(content, filename or "")
+    return detect_format_from_bytes(content, filename or "", content_type)
 
 
 # Global dictionary holding singleton extractors to avoid reinitialization overhead
