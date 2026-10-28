@@ -1,3 +1,4 @@
+import asyncio
 import io
 import xml.etree.ElementTree as ET
 import zipfile
@@ -426,5 +427,125 @@ async def test_url_extraction_inflight_coalescing():
                 assert r2.content == "Extracted once"
                 assert call_count == 1
                 assert len(_inflight_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_download_retry_on_520_server_error():
+    import httpx
+    from unittest.mock import AsyncMock, MagicMock
+    from app.routers.url_extract import _download_content_with_retry
+
+    attempt_count = 0
+
+    class MockStreamContext:
+        async def __aenter__(self):
+            nonlocal attempt_count
+            attempt_count += 1
+            mock_resp = MagicMock()
+            if attempt_count < 3:
+                # First 2 attempts fail with HTTP 520
+                mock_request = httpx.Request("GET", "https://author.globaljournals.org/test.pdf")
+                mock_520 = httpx.Response(status_code=520, request=mock_request)
+                mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "Server error 520", request=mock_request, response=mock_520
+                )
+            else:
+                # 3rd attempt succeeds
+                mock_resp.raise_for_status.return_value = None
+                mock_resp.headers = {"content-length": "13", "content-type": "application/pdf"}
+
+                async def mock_aiter(chunk_size=65536):
+                    yield b"%PDF-mock-data"
+
+                mock_resp.aiter_bytes = mock_aiter
+            return mock_resp
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_client = MagicMock()
+    mock_client.stream.side_effect = lambda method, url: MockStreamContext()
+    sem = asyncio.Semaphore(5)
+
+    with patch("app.config.settings.DOWNLOAD_RETRY_BACKOFF_SECONDS", 0.001):
+        content, ctype, cdisp = await _download_content_with_retry(
+            mock_client, "https://author.globaljournals.org/test.pdf", sem
+        )
+        assert attempt_count == 3
+        assert content == b"%PDF-mock-data"
+
+
+@pytest.mark.asyncio
+async def test_download_retry_on_read_timeout():
+    import httpx
+    from unittest.mock import AsyncMock, MagicMock
+    from app.routers.url_extract import _download_content_with_retry
+
+    attempt_count = 0
+
+    class MockStreamContext:
+        async def __aenter__(self):
+            nonlocal attempt_count
+            attempt_count += 1
+            if attempt_count == 1:
+                raise httpx.ReadTimeout("Read timed out")
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.return_value = None
+            mock_resp.headers = {"content-length": "10", "content-type": "text/plain"}
+
+            async def mock_aiter(chunk_size=65536):
+                yield b"hello retry"
+
+            mock_resp.aiter_bytes = mock_aiter
+            return mock_resp
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_client = MagicMock()
+    mock_client.stream.side_effect = lambda method, url: MockStreamContext()
+    sem = asyncio.Semaphore(5)
+
+    with patch("app.config.settings.DOWNLOAD_RETRY_BACKOFF_SECONDS", 0.001):
+        content, ctype, cdisp = await _download_content_with_retry(
+            mock_client, "https://example.com/file.txt", sem
+        )
+        assert attempt_count == 2
+        assert content == b"hello retry"
+
+
+@pytest.mark.asyncio
+async def test_download_does_not_retry_on_404():
+    import httpx
+    from unittest.mock import MagicMock
+    from app.routers.url_extract import _download_content_with_retry
+
+    attempt_count = 0
+
+    class MockStreamContext:
+        async def __aenter__(self):
+            nonlocal attempt_count
+            attempt_count += 1
+            mock_request = httpx.Request("GET", "https://example.com/missing.pdf")
+            mock_404 = httpx.Response(status_code=404, request=mock_request)
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "Client error 404", request=mock_request, response=mock_404
+            )
+            return mock_resp
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_client = MagicMock()
+    mock_client.stream.side_effect = lambda method, url: MockStreamContext()
+    sem = asyncio.Semaphore(5)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _download_content_with_retry(
+            mock_client, "https://example.com/missing.pdf", sem
+        )
+    assert attempt_count == 1
+
 
 

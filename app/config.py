@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     MAX_WORKERS: int = (os.cpu_count() or 2) * 2
     MAX_CONCURRENT_DOWNLOADS: int = 10
     DOWNLOAD_TIMEOUT_SECONDS: int = 30
+    DOWNLOAD_RETRIES: int = 3
+    DOWNLOAD_RETRY_BACKOFF_SECONDS: float = 5.0
     MAX_FILE_SIZE_MB: int = 50
     REQUEST_TIMEOUT_SECONDS: int = 120
     LOG_LEVEL: str = "INFO"

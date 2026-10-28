@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, HttpUrl, field_validator
 
@@ -64,42 +65,102 @@ _inflight_tasks: dict[str, asyncio.Future[URLExtractResult]] = {}
 _inflight_lock = asyncio.Lock()
 
 
+async def _download_content_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    download_semaphore: asyncio.Semaphore,
+) -> tuple[bytes, str | None, str]:
+    """Download bytes from URL with retry for transient server/network errors."""
+    attempts = max(1, settings.DOWNLOAD_RETRIES)
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            async with download_semaphore:
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+
+                    # Check Content-Length before reading
+                    content_length = int(response.headers.get("content-length", 0))
+                    if content_length > max_bytes:
+                        raise FileTooLargeError(
+                            f"File too large: {content_length} bytes "
+                            f"(limit: {settings.MAX_FILE_SIZE_MB} MB)"
+                        )
+
+                    # Stream and accumulate bytes
+                    chunks: list[bytes] = []
+                    total_size = 0
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        total_size += len(chunk)
+                        if total_size > max_bytes:
+                            raise FileTooLargeError(
+                                f"File too large: exceeded {settings.MAX_FILE_SIZE_MB} MB during download"
+                            )
+                        chunks.append(chunk)
+
+                    content = b"".join(chunks)
+                    content_type = response.headers.get("content-type")
+                    content_disposition = response.headers.get("content-disposition", "")
+                    return content, content_type, content_disposition
+
+        except FileTooLargeError:
+            # File size limit violations should not be retried
+            raise
+        except httpx.HTTPStatusError as exc:
+            # Retry transient server errors (5xx) or rate limits (429)
+            if exc.response.status_code >= 500 or exc.response.status_code == 429:
+                last_error = exc
+                if attempt < attempts:
+                    backoff = settings.DOWNLOAD_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Download attempt %d/%d for URL %s failed with status %d; retrying in %.1fs...",
+                        attempt,
+                        attempts,
+                        url,
+                        exc.response.status_code,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+            raise
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+            if attempt < attempts:
+                backoff = settings.DOWNLOAD_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "Download attempt %d/%d for URL %s failed with %s (%s); retrying in %.1fs...",
+                    attempt,
+                    attempts,
+                    url,
+                    type(exc).__name__,
+                    exc,
+                    backoff,
+                )
+                await asyncio.sleep(backoff)
+                continue
+            raise
+
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Download failed for {url}")
+
+
 async def _execute_url_extraction(
     url: str,
-    client,
+    client: httpx.AsyncClient,
     executor,
     download_semaphore: asyncio.Semaphore,
     extraction_semaphore: asyncio.Semaphore,
 ) -> URLExtractResult:
     """Internal runner to download, detect format, and extract text from a single URL."""
     try:
-        async with download_semaphore:
-            async with client.stream("GET", url) as response:
-                response.raise_for_status()
-
-                # Check Content-Length before reading
-                content_length = int(response.headers.get("content-length", 0))
-                max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
-                if content_length > max_bytes:
-                    raise FileTooLargeError(
-                        f"File too large: {content_length} bytes "
-                        f"(limit: {settings.MAX_FILE_SIZE_MB} MB)"
-                    )
-
-                # Stream and accumulate bytes
-                chunks: list[bytes] = []
-                total_size = 0
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    total_size += len(chunk)
-                    if total_size > max_bytes:
-                        raise FileTooLargeError(
-                            f"File too large: exceeded {settings.MAX_FILE_SIZE_MB} MB during download"
-                        )
-                    chunks.append(chunk)
-
-                content = b"".join(chunks)
-                content_type = response.headers.get("content-type")
-                content_disposition = response.headers.get("content-disposition", "")
+        content, content_type, content_disposition = await _download_content_with_retry(
+            client=client,
+            url=url,
+            download_semaphore=download_semaphore,
+        )
 
         # Detect format, prioritizing Content-Disposition filename if present
         effective_filename = url
